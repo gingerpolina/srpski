@@ -12,6 +12,10 @@ st.set_page_config(
     layout="centered"
 )
 
+# Инициализация состояния
+if "user_name" not in st.session_state:
+    st.session_state.user_name = ""
+
 # Подключение к Google Таблицам
 @st.cache_resource
 def init_gsheets():
@@ -29,22 +33,46 @@ def init_gsheets():
         return client.open_by_key(st.secrets["spreadsheet_id"])
     return client.open(st.secrets.get("spreadsheet_name", "Практика Сербского"))
 
-# Интерфейс
+# Заголовок приложения
 st.title("Генератор тем для разговора 🇷🇸")
 st.caption("Сербский язык — практика говорения")
 
-name = st.text_input("Как тебя зовут?", placeholder="Введи свое имя...").strip()
-
-if name:
-    st.write(f"Zdravo, **{name}**! Выбери формат практики:")
+# Блок ввода имени и авторизации
+if not st.session_state.user_name:
+    input_name = st.text_input(
+        "Как тебя зовут?", 
+        placeholder="Введи свое имя, чтобы начать...",
+        key="temp_name_input"
+    ).strip()
     
-    # Обновленные режимы в соответствии с вкладками таблицы
+    # Кнопка активна только если введено минимум 3 символа
+    is_valid = len(input_name) >= 3
+    if st.button("Старт", type="primary", disabled=not is_valid, use_container_width=True):
+        st.session_state.user_name = input_name
+        st.rerun()
+
+else:
+    # Имя зафиксировано, поле заблокировано для изменений
+    col_name, col_reset = st.columns([4, 1])
+    with col_name:
+        st.text_input("Как тебя зовут?", value=st.session_state.user_name, disabled=True)
+    with col_reset:
+        st.write("")  # Отступ для выравнивания кнопки
+        st.write("")
+        if st.button("Сменить", use_container_width=True):
+            st.session_state.user_name = ""
+            st.rerun()
+
+    st.write(f"Zdravo, **{st.session_state.user_name}**! Выбери формат практики:")
+    
+    # Выбор режима
     mode = st.radio(
         "Режим:",
         ["Ответ на вопрос", "Презентация", "Составить текст из набора слов"],
         horizontal=False
     )
     
+    # Кнопка генерации задания
     if st.button("🎲 Получить задание", type="primary", use_container_width=True):
         with st.spinner("Выбираем тему из базы..."):
             try:
@@ -54,14 +82,18 @@ if name:
                 # 1. Режим: Ответ на вопрос
                 if mode == "Ответ на вопрос":
                     worksheet = sheet.worksheet("Ответ на вопрос")
-                    rows = worksheet.col_values(1)[1:]  # пропускаем заголовок
+                    rows = worksheet.col_values(1)[1:]
                     topics = [t.strip() for t in rows if t.strip()]
                     
                     if not topics:
                         st.warning("В базе 'Ответ на вопрос' пока нет тем.")
                     else:
                         result = random.choice(topics)
-                        st.success(f"### ❓ Твой вопрос/тема:\n**{result}**")
+                        st.success(f"""
+<sub>❓ Твой вопрос/тема:</sub>
+
+### {result}
+""")
                         log_text = f"Ответ на вопрос: {result}"
                 
                 # 2. Режим: Презентация
@@ -77,9 +109,9 @@ if name:
                         result_topic = chosen[0].strip()
                         result_vocab = chosen[1].strip() if len(chosen) > 1 and chosen[1].strip() else "—"
                         
-                        # Напоминалка о структуре презентации
-                        st.info("""
-### 📋 Struktura izlaganja:
+                        # Аккордеон со структурой (по умолчанию свернут)
+                        with st.expander("📋 Struktura izlaganja (нажми, чтобы открыть структуру)"):
+                            st.markdown("""
 1. **Uvod:** Izbor i kratka definicija teme.
 2. **Lično iskustvo:** Moje lično iskustvo sa ovom temom u svakodnevnom životu.
 3. **Situacija u mojoj zemlji:** Kako je to rešeno u mojoj domovini, kakav je opšti stav društva.
@@ -87,8 +119,17 @@ if name:
 5. **Zaključak:** Kratak rezime i lični završni stav.
 """)
                         
-                        st.success(f"### 📊 Тема для презентации:\n**{result_topic}**")
-                        st.warning(f"**Опорный вокабуляр:**\n{result_vocab}")
+                        st.success(f"""
+<sub>📊 Тема для презентации:</sub>
+
+### {result_topic}
+""")
+                        
+                        st.warning(f"""
+<sub>💡 Опорный вокабуляр:</sub>
+
+### {result_vocab}
+""")
                         log_text = f"Презентация: {result_topic}"
                 
                 # 3. Режим: Составить текст из набора слов
@@ -101,7 +142,11 @@ if name:
                         st.warning("В базе пока нет наборов слов.")
                     else:
                         result = random.choice(vocab_sets)
-                        st.success(f"### 📝 Твой набор слов:\n**{result}**")
+                        st.success(f"""
+<sub>📝 Твой набор слов:</sub>
+
+### {result}
+""")
                         log_text = f"Составить текст: {result}"
                 
                 # Запись в логи
@@ -111,7 +156,7 @@ if name:
                     current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
                     
                     logs_sheet.append_row(
-                        [name, log_text, current_time], 
+                        [st.session_state.user_name, log_text, current_time], 
                         value_input_option='USER_ENTERED'
                     )
                     
@@ -119,5 +164,3 @@ if name:
                 st.error("Произошла ошибка при обращении к Google Таблице.")
                 with st.expander("Детали ошибки"):
                     st.write(e)
-else:
-    st.info("👋 Введи свое имя выше, чтобы начать.")
