@@ -12,6 +12,64 @@ st.set_page_config(
     layout="centered"
 )
 
+# Стили для скрытия подсказки "Press Enter", увеличения шрифтов и подсветки аккордеона
+st.markdown("""
+<style>
+/* Прячем подсказку 'Press Enter to apply' */
+div[data-testid="InputInstructions"] {
+    display: none !important;
+}
+
+/* Стилизуем аккордеон структуры: делаем его цветным и заметным */
+div[data-testid="stExpander"] {
+    background-color: rgba(30, 64, 175, 0.2) !important;
+    border: 1px solid rgba(96, 165, 250, 0.5) !important;
+    border-radius: 10px !important;
+    margin-top: 10px !important;
+    margin-bottom: 14px !important;
+}
+div[data-testid="stExpander"] summary p {
+    font-size: 1.15rem !important;
+    font-weight: 700 !important;
+    color: #93c5fd !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Функция для вывода красивых карточек (мелкий заголовок + крупный текст)
+def render_card(label: str, content: str, card_type: str = "green"):
+    if card_type == "green":
+        bg = "rgba(34, 197, 94, 0.15)"
+        border = "rgba(34, 197, 94, 0.45)"
+        label_color = "#86efac"
+    elif card_type == "orange":
+        bg = "rgba(245, 158, 11, 0.15)"
+        border = "rgba(245, 158, 11, 0.45)"
+        label_color = "#fcd34d"
+    else:
+        bg = "rgba(59, 130, 246, 0.15)"
+        border = "rgba(59, 130, 246, 0.45)"
+        label_color = "#93c5fd"
+
+    html = f"""
+    <div style="
+        background-color: {bg};
+        border: 1px solid {border};
+        border-radius: 10px;
+        padding: 16px 20px;
+        margin-top: 10px;
+        margin-bottom: 12px;
+    ">
+        <div style="font-size: 0.85rem; color: {label_color}; font-weight: 600; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
+            {label}
+        </div>
+        <div style="font-size: 1.4rem; font-weight: 700; color: #ffffff; line-height: 1.4;">
+            {content}
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
 # Инициализация состояния
 if "user_name" not in st.session_state:
     st.session_state.user_name = ""
@@ -33,31 +91,34 @@ def init_gsheets():
         return client.open_by_key(st.secrets["spreadsheet_id"])
     return client.open(st.secrets.get("spreadsheet_name", "Практика Сербского"))
 
-# Заголовок приложения
+# Шапка сайта
 st.title("Генератор тем для разговора 🇷🇸")
 st.caption("Сербский язык — практика говорения")
 
-# Блок ввода имени и авторизации
+# Блок ввода имени
 if not st.session_state.user_name:
-    input_name = st.text_input(
-        "Как тебя зовут?", 
-        placeholder="Введи свое имя, чтобы начать...",
-        key="temp_name_input"
-    ).strip()
-    
-    # Кнопка активна только если введено минимум 3 символа
-    is_valid = len(input_name) >= 3
-    if st.button("Старт", type="primary", disabled=not is_valid, use_container_width=True):
-        st.session_state.user_name = input_name
-        st.rerun()
+    with st.form("name_form", border=False):
+        input_name = st.text_input(
+            "Как тебя зовут?", 
+            placeholder="Введи свое имя, чтобы начать...",
+            key="temp_name_input"
+        )
+        submitted = st.form_submit_button("Старт", type="primary", use_container_width=True)
+        if submitted:
+            cleaned_name = input_name.strip()
+            if len(cleaned_name) >= 3:
+                st.session_state.user_name = cleaned_name
+                st.rerun()
+            else:
+                st.warning("Имя должно содержать минимум 3 буквы.")
 
 else:
-    # Имя зафиксировано, поле заблокировано для изменений
+    # Зафиксированное имя (нельзя редактировать, пока не нажата кнопка "Сменить")
     col_name, col_reset = st.columns([4, 1])
     with col_name:
         st.text_input("Как тебя зовут?", value=st.session_state.user_name, disabled=True)
     with col_reset:
-        st.write("")  # Отступ для выравнивания кнопки
+        st.write("")
         st.write("")
         if st.button("Сменить", use_container_width=True):
             st.session_state.user_name = ""
@@ -72,7 +133,7 @@ else:
         horizontal=False
     )
     
-    # Кнопка генерации задания
+    # Кнопка получения темы
     if st.button("🎲 Получить задание", type="primary", use_container_width=True):
         with st.spinner("Выбираем тему из базы..."):
             try:
@@ -89,11 +150,7 @@ else:
                         st.warning("В базе 'Ответ на вопрос' пока нет тем.")
                     else:
                         result = random.choice(topics)
-                        st.success(f"""
-<sub>❓ Твой вопрос/тема:</sub>
-
-### {result}
-""")
+                        render_card("❓ Твой вопрос/тема", result, card_type="green")
                         log_text = f"Ответ на вопрос: {result}"
                 
                 # 2. Режим: Презентация
@@ -109,7 +166,7 @@ else:
                         result_topic = chosen[0].strip()
                         result_vocab = chosen[1].strip() if len(chosen) > 1 and chosen[1].strip() else "—"
                         
-                        # Аккордеон со структурой (по умолчанию свернут)
+                        # Аккордеон со структурой презентации
                         with st.expander("📋 Struktura izlaganja (нажми, чтобы открыть структуру)"):
                             st.markdown("""
 1. **Uvod:** Izbor i kratka definicija teme.
@@ -119,17 +176,12 @@ else:
 5. **Zaključak:** Kratak rezime i lični završni stav.
 """)
                         
-                        st.success(f"""
-<sub>📊 Тема для презентации:</sub>
-
-### {result_topic}
-""")
+                        # Карточка темы
+                        render_card("📊 Тема для презентации", result_topic, card_type="green")
                         
-                        st.warning(f"""
-<sub>💡 Опорный вокабуляр:</sub>
-
-### {result_vocab}
-""")
+                        # Карточка вокабуляра
+                        render_card("💡 Опорный вокабуляр", result_vocab, card_type="orange")
+                        
                         log_text = f"Презентация: {result_topic}"
                 
                 # 3. Режим: Составить текст из набора слов
@@ -142,14 +194,10 @@ else:
                         st.warning("В базе пока нет наборов слов.")
                     else:
                         result = random.choice(vocab_sets)
-                        st.success(f"""
-<sub>📝 Твой набор слов:</sub>
-
-### {result}
-""")
+                        render_card("📝 Твой набор слов", result, card_type="green")
                         log_text = f"Составить текст: {result}"
                 
-                # Запись в логи
+                # Запись в лист "Логи"
                 if log_text:
                     logs_sheet = sheet.worksheet("Логи")
                     tz = pytz.timezone('Europe/Belgrade')
