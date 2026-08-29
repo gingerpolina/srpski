@@ -1,0 +1,8 @@
+# Секреты и ключи
+*.json
+.streamlit/secrets.toml
+
+# Python окружение
+__pycache__/
+venv/
+.env
