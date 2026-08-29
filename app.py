@@ -19,15 +19,12 @@ def init_gsheets():
         'https://www.googleapis.com/auth/spreadsheets',
         'https://www.googleapis.com/auth/drive'
     ]
-    # Данные берутся из st.secrets
     creds = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"], 
         scopes=scopes
     )
     client = gspread.authorize(creds)
     
-    # Открываем по ID (или названию) из секретов
-    # Если в secrets указан SPREADSHEET_ID, используем его, иначе ищем по названию
     if "spreadsheet_id" in st.secrets:
         return client.open_by_key(st.secrets["spreadsheet_id"])
     return client.open(st.secrets.get("spreadsheet_name", "Практика Сербского"))
@@ -41,35 +38,36 @@ name = st.text_input("Как тебя зовут?", placeholder="Введи св
 if name:
     st.write(f"Zdravo, **{name}**! Выбери формат практики:")
     
+    # Обновленные режимы в соответствии с вкладками таблицы
     mode = st.radio(
         "Режим:",
-        ["Короткий монолог", "Презентация", "По вокабуляру"],
-        horizontal=True
+        ["Ответ на вопрос", "Презентация", "Составить текст из набора слов"],
+        horizontal=False
     )
     
-    if st.button("🎲 Получить тему", type="primary", use_container_width=True):
+    if st.button("🎲 Получить задание", type="primary", use_container_width=True):
         with st.spinner("Выбираем тему из базы..."):
             try:
                 sheet = init_gsheets()
                 log_text = ""
                 
-                # 1. Режим: Короткий монолог
-                if mode == "Короткий монолог":
-                    worksheet = sheet.worksheet("Монолог")
+                # 1. Режим: Ответ на вопрос
+                if mode == "Ответ на вопрос":
+                    worksheet = sheet.worksheet("Ответ на вопрос")
                     rows = worksheet.col_values(1)[1:]  # пропускаем заголовок
                     topics = [t.strip() for t in rows if t.strip()]
                     
                     if not topics:
-                        st.warning("В базе 'Монолог' пока нет тем.")
+                        st.warning("В базе 'Ответ на вопрос' пока нет тем.")
                     else:
                         result = random.choice(topics)
-                        st.success(f"### 🗣 Твоя тема:\n**{result}**")
-                        log_text = f"Монолог: {result}"
+                        st.success(f"### ❓ Твой вопрос/тема:\n**{result}**")
+                        log_text = f"Ответ на вопрос: {result}"
                 
                 # 2. Режим: Презентация
                 elif mode == "Презентация":
                     worksheet = sheet.worksheet("Презентация")
-                    all_rows = worksheet.get_all_values()[1:]  # получаем строки [[тема, слова], ...]
+                    all_rows = worksheet.get_all_values()[1:]
                     valid_rows = [r for r in all_rows if len(r) > 0 and r[0].strip()]
                     
                     if not valid_rows:
@@ -79,38 +77,47 @@ if name:
                         result_topic = chosen[0].strip()
                         result_vocab = chosen[1].strip() if len(chosen) > 1 and chosen[1].strip() else "—"
                         
+                        # Напоминалка о структуре презентации
+                        st.info("""
+### 📋 Struktura izlaganja:
+1. **Uvod:** Izbor i kratka definicija teme.
+2. **Lično iskustvo:** Moje lično iskustvo sa ovom temom u svakodnevnom životu.
+3. **Situacija u mojoj zemlji:** Kako je to rešeno u mojoj domovini, kakav je opšti stav društva.
+4. **Prednosti i mane:** Argumentacija "za" i "protiv", dobre i loše strane fenomena.
+5. **Zaključak:** Kratak rezime i lični završni stav.
+""")
+                        
                         st.success(f"### 📊 Тема для презентации:\n**{result_topic}**")
-                        st.info(f"**Опорные слова:**\n{result_vocab}")
+                        st.warning(f"**Опорный вокабуляр:**\n{result_vocab}")
                         log_text = f"Презентация: {result_topic}"
                 
-                # 3. Режим: По вокабуляру
-                elif mode == "По вокабуляру":
-                    worksheet = sheet.worksheet("Вокабуляр")
+                # 3. Режим: Составить текст из набора слов
+                elif mode == "Составить текст из набора слов":
+                    worksheet = sheet.worksheet("Составить текст из набора слов")
                     rows = worksheet.col_values(1)[1:]
                     vocab_sets = [v.strip() for v in rows if v.strip()]
                     
                     if not vocab_sets:
-                        st.warning("В базе 'Вокабуляр' пока нет наборов слов.")
+                        st.warning("В базе пока нет наборов слов.")
                     else:
                         result = random.choice(vocab_sets)
                         st.success(f"### 📝 Твой набор слов:\n**{result}**")
-                        log_text = f"Вокабуляр: {result}"
+                        log_text = f"Составить текст: {result}"
                 
-                # Запись в логи (если тема была успешно выбрана)
+                # Запись в логи
                 if log_text:
                     logs_sheet = sheet.worksheet("Логи")
                     tz = pytz.timezone('Europe/Belgrade')
                     current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
                     
-                    # Добавляем строку: Имя, Тема, Время (Белград)
                     logs_sheet.append_row(
                         [name, log_text, current_time], 
                         value_input_option='USER_ENTERED'
                     )
                     
             except Exception as e:
-                st.error("Произошла ошибка при подключении к Google Таблице.")
+                st.error("Произошла ошибка при обращении к Google Таблице.")
                 with st.expander("Детали ошибки"):
                     st.write(e)
 else:
-    st.info("👋 Введи имя выше, чтобы начать.")
+    st.info("👋 Введи свое имя выше, чтобы начать.")
