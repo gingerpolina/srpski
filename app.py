@@ -31,25 +31,22 @@ div[data-testid="stExpander"] {
 div[data-testid="stExpander"] summary p {
     font-size: 1.15rem !important;
     font-weight: 700 !important;
-    color: #93c5fd !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # Функция для вывода красивых карточек (мелкий заголовок + крупный текст)
 def render_card(label: str, content: str, card_type: str = "green"):
+    # Полупрозрачные фоны и цвет текста по теме Streamlit — читается и в светлой, и в тёмной теме
     if card_type == "green":
         bg = "rgba(34, 197, 94, 0.15)"
         border = "rgba(34, 197, 94, 0.45)"
-        label_color = "#86efac"
     elif card_type == "orange":
         bg = "rgba(245, 158, 11, 0.15)"
         border = "rgba(245, 158, 11, 0.45)"
-        label_color = "#fcd34d"
     else:
         bg = "rgba(59, 130, 246, 0.15)"
         border = "rgba(59, 130, 246, 0.45)"
-        label_color = "#93c5fd"
 
     html = f"""
     <div style="
@@ -60,10 +57,10 @@ def render_card(label: str, content: str, card_type: str = "green"):
         margin-top: 10px;
         margin-bottom: 12px;
     ">
-        <div style="font-size: 0.85rem; color: {label_color}; font-weight: 600; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
+        <div style="font-size: 0.85rem; color: inherit; opacity: 0.7; font-weight: 600; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
             {label}
         </div>
-        <div style="font-size: 1.4rem; font-weight: 700; color: #ffffff; line-height: 1.4;">
+        <div style="font-size: 1.4rem; font-weight: 700; color: inherit; line-height: 1.4;">
             {content}
         </div>
     </div>
@@ -73,6 +70,21 @@ def render_card(label: str, content: str, card_type: str = "green"):
 # Инициализация состояния
 if "user_name" not in st.session_state:
     st.session_state.user_name = ""
+if "seen" not in st.session_state:
+    st.session_state.seen = {}  # режим -> задания, которые уже выпадали в этой сессии
+
+# Случайный выбор без повторов: пока не выпадут все задания режима, одно и то же не повторится
+def pick_unseen(mode: str, items: list):
+    seen = st.session_state.seen.setdefault(mode, [])
+    candidates = [i for i in items if i not in seen]
+    if not candidates:
+        # Всё уже было — начинаем круг заново, но не с того же задания, что только что выпало
+        last = seen[-1] if seen else None
+        seen.clear()
+        candidates = [i for i in items if i != last] or items
+    choice = random.choice(candidates)
+    seen.append(choice)
+    return choice
 
 # Подключение к Google Таблицам
 @st.cache_resource
@@ -149,7 +161,7 @@ else:
                     if not topics:
                         st.warning("В базе 'Ответ на вопрос' пока нет тем.")
                     else:
-                        result = random.choice(topics)
+                        result = pick_unseen(mode, topics)
                         render_card("❓ Твой вопрос/тема", result, card_type="green")
                         log_text = f"Ответ на вопрос: {result}"
                 
@@ -162,7 +174,7 @@ else:
                     if not valid_rows:
                         st.warning("В базе 'Презентация' пока нет тем.")
                     else:
-                        chosen = random.choice(valid_rows)
+                        chosen = pick_unseen(mode, valid_rows)
                         result_topic = chosen[0].strip()
                         result_vocab = chosen[1].strip() if len(chosen) > 1 and chosen[1].strip() else "—"
                         
@@ -193,7 +205,7 @@ else:
                     if not vocab_sets:
                         st.warning("В базе пока нет наборов слов.")
                     else:
-                        result = random.choice(vocab_sets)
+                        result = pick_unseen(mode, vocab_sets)
                         render_card("📝 Твой набор слов", result, card_type="green")
                         log_text = f"Составить текст: {result}"
                 
