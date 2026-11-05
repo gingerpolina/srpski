@@ -72,6 +72,8 @@ if "user_name" not in st.session_state:
     st.session_state.user_name = ""
 if "seen" not in st.session_state:
     st.session_state.seen = {}  # режим -> задания, которые уже выпадали в этой сессии
+if "task" not in st.session_state:
+    st.session_state.task = {}  # текущее задание: режим, строка, показан ли ответ
 
 # Случайный выбор без повторов: пока не выпадут все задания режима, одно и то же не повторится
 def pick_unseen(mode: str, items: list):
@@ -102,6 +104,71 @@ def init_gsheets():
     if "spreadsheet_id" in st.secrets:
         return client.open_by_key(st.secrets["spreadsheet_id"])
     return client.open(st.secrets.get("spreadsheet_name", "Практика Сербского"))
+
+# Чтение листа целиком (кэш 5 минут, чтобы кнопки вроде «Показать ответ» не дёргали таблицу заново)
+@st.cache_data(ttl=300, show_spinner=False)
+def load_rows(sheet_name: str):
+    rows = init_gsheets().worksheet(sheet_name).get_all_values()[1:]
+    return [[c.strip() for c in r] for r in rows if r and r[0].strip()]
+
+def log_task(log_text: str):
+    tz = pytz.timezone('Europe/Belgrade')
+    current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+    init_gsheets().worksheet("Логи").append_row(
+        [st.session_state.user_name, log_text, current_time],
+        value_input_option='USER_ENTERED'
+    )
+
+STRUKTURA = """
+1. **Uvod:** Izbor i kratka definicija teme.
+2. **Lično iskustvo:** Moje lično iskustvo sa ovom temom u svakodnevnom životu.
+3. **Situacija u mojoj zemlji:** Kako je to rešeno u mojoj domovini, kakav je opšti stav društva.
+4. **Prednosti i mane:** Argumentacija "za" i "protiv", dobre i loše strane fenomena.
+5. **Zaključak:** Kratak rezime i lični završni stav.
+"""
+
+# --- Отрисовка заданий по режимам ---
+def show_question(row):
+    render_card("❓ Твой вопрос/тема", row[0], card_type="green")
+
+def show_presentation(row):
+    with st.expander("📋 Struktura izlaganja (нажми, чтобы открыть структуру)"):
+        st.markdown(STRUKTURA)
+    render_card("📊 Тема для презентации", row[0], card_type="green")
+    vocab = row[1] if len(row) > 1 and row[1] else "—"
+    render_card("💡 Опорный вокабуляр", vocab, card_type="orange")
+
+def show_word_set(row):
+    render_card("📝 Твой набор слов", row[0], card_type="green")
+
+def show_grammar(row):
+    # Колонки листа «Грамматика»: Тема | Блок | Как строить | Русский | Подсказка | Ответ
+    row = row + [""] * (6 - len(row))
+    topic, block, rule, rus, hint, answer = row[:6]
+    label = f"🧩 {topic} · {block}" if block else f"🧩 {topic}"
+    content = rus + (f'<div style="font-size: 1.05rem; font-weight: 500; opacity: 0.75; margin-top: 6px;">({hint})</div>' if hint else "")
+    render_card(label, content, card_type="green")
+    if st.session_state.task.get("show_answer"):
+        render_card("✅ Ответ", "<br>".join(a.strip() for a in answer.split(" / ")), card_type="orange")
+        if rule:
+            st.caption(f"Как строить: {rule}")
+    elif st.button("👀 Показать ответ", use_container_width=True):
+        st.session_state.task["show_answer"] = True
+        st.rerun()
+
+# Все режимы в одном месте: чтобы добавить новый — допиши сюда строку
+# sheet — лист в таблице, show — как показать задание, log — что записать в «Логи»
+MODES = {
+    "Ответ на вопрос": dict(sheet="Ответ на вопрос", show=show_question,
+                            log=lambda r: f"Ответ на вопрос: {r[0]}"),
+    "Презентация": dict(sheet="Презентация", show=show_presentation,
+                        log=lambda r: f"Презентация: {r[0]}"),
+    "Составить текст из набора слов": dict(sheet="Составить текст из набора слов", show=show_word_set,
+                                           log=lambda r: f"Составить текст: {r[0]}"),
+    "Грамматика": dict(sheet="Грамматика", show=show_grammar, by_topic=True,
+                       log=lambda r: f"Грамматика ({r[0]}): {r[3] if len(r) > 3 else ''}"),
+}
+ALL_TOPICS = "Все темы вперемешку"
 
 # Шапка сайта
 st.title("Генератор тем для разговора 🇷🇸")
@@ -137,90 +204,35 @@ else:
             st.rerun()
 
     st.write(f"Zdravo, **{st.session_state.user_name}**! Выбери формат практики:")
-    
-    # Выбор режима
-    mode = st.radio(
-        "Режим:",
-        ["Ответ на вопрос", "Презентация", "Составить текст из набора слов"],
-        horizontal=False
-    )
-    
-    # Кнопка получения темы
-    if st.button("🎲 Получить задание", type="primary", use_container_width=True):
-        with st.spinner("Выбираем тему из базы..."):
-            try:
-                sheet = init_gsheets()
-                log_text = ""
-                
-                # 1. Режим: Ответ на вопрос
-                if mode == "Ответ на вопрос":
-                    worksheet = sheet.worksheet("Ответ на вопрос")
-                    rows = worksheet.col_values(1)[1:]
-                    topics = [t.strip() for t in rows if t.strip()]
-                    
-                    if not topics:
-                        st.warning("В базе 'Ответ на вопрос' пока нет тем.")
-                    else:
-                        result = pick_unseen(mode, topics)
-                        render_card("❓ Твой вопрос/тема", result, card_type="green")
-                        log_text = f"Ответ на вопрос: {result}"
-                
-                # 2. Режим: Презентация
-                elif mode == "Презентация":
-                    worksheet = sheet.worksheet("Презентация")
-                    all_rows = worksheet.get_all_values()[1:]
-                    valid_rows = [r for r in all_rows if len(r) > 0 and r[0].strip()]
-                    
-                    if not valid_rows:
-                        st.warning("В базе 'Презентация' пока нет тем.")
-                    else:
-                        chosen = pick_unseen(mode, valid_rows)
-                        result_topic = chosen[0].strip()
-                        result_vocab = chosen[1].strip() if len(chosen) > 1 and chosen[1].strip() else "—"
-                        
-                        # Аккордеон со структурой презентации
-                        with st.expander("📋 Struktura izlaganja (нажми, чтобы открыть структуру)"):
-                            st.markdown("""
-1. **Uvod:** Izbor i kratka definicija teme.
-2. **Lično iskustvo:** Moje lično iskustvo sa ovom temom u svakodnevnom životu.
-3. **Situacija u mojoj zemlji:** Kako je to rešeno u mojoj domovini, kakav je opšti stav društva.
-4. **Prednosti i mane:** Argumentacija "za" i "protiv", dobre i loše strane fenomena.
-5. **Zaključak:** Kratak rezime i lični završni stav.
-""")
-                        
-                        # Карточка темы
-                        render_card("📊 Тема для презентации", result_topic, card_type="green")
-                        
-                        # Карточка вокабуляра
-                        render_card("💡 Опорный вокабуляр", result_vocab, card_type="orange")
-                        
-                        log_text = f"Презентация: {result_topic}"
-                
-                # 3. Режим: Составить текст из набора слов
-                elif mode == "Составить текст из набора слов":
-                    worksheet = sheet.worksheet("Составить текст из набора слов")
-                    rows = worksheet.col_values(1)[1:]
-                    vocab_sets = [v.strip() for v in rows if v.strip()]
-                    
-                    if not vocab_sets:
-                        st.warning("В базе пока нет наборов слов.")
-                    else:
-                        result = pick_unseen(mode, vocab_sets)
-                        render_card("📝 Твой набор слов", result, card_type="green")
-                        log_text = f"Составить текст: {result}"
-                
-                # Запись в лист "Логи"
-                if log_text:
-                    logs_sheet = sheet.worksheet("Логи")
-                    tz = pytz.timezone('Europe/Belgrade')
-                    current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
-                    
-                    logs_sheet.append_row(
-                        [st.session_state.user_name, log_text, current_time], 
-                        value_input_option='USER_ENTERED'
-                    )
-                    
-            except Exception as e:
-                st.error("Произошла ошибка при обращении к Google Таблице.")
-                with st.expander("Детали ошибки"):
-                    st.write(e)
+
+    mode = st.radio("Режим:", list(MODES), horizontal=False)
+    cfg = MODES[mode]
+
+    try:
+        rows = load_rows(cfg["sheet"])
+        seen_key = mode
+        if cfg.get("by_topic"):
+            topics = list(dict.fromkeys(r[0] for r in rows))
+            options = topics + [ALL_TOPICS] if len(topics) > 1 else topics
+            topic = st.selectbox("Тема:", options) if options else None
+            if topic and topic != ALL_TOPICS:
+                rows = [r for r in rows if r[0] == topic]
+            seen_key = f"{mode}: {topic}"
+
+        if st.button("🎲 Получить задание", type="primary", use_container_width=True):
+            if not rows:
+                st.session_state.task = {}
+                st.warning(f"В базе «{cfg['sheet']}» пока нет заданий.")
+            else:
+                row = pick_unseen(seen_key, rows)
+                st.session_state.task = {"mode": mode, "row": row, "show_answer": False}
+                log_task(cfg["log"](row))
+
+        task = st.session_state.task
+        if task and task["mode"] == mode:
+            cfg["show"](task["row"])
+
+    except Exception as e:
+        st.error("Произошла ошибка при обращении к Google Таблице.")
+        with st.expander("Детали ошибки"):
+            st.write(e)
