@@ -145,13 +145,13 @@ def show_grammar(row):
     # Колонки листа «Грамматика»: Тема | Блок | Как строить | Русский | Подсказка | Ответ
     row = row + [""] * (6 - len(row))
     topic, block, rule, rus, hint, answer = row[:6]
-    label = f"🧩 {topic} · {block}" if block else f"🧩 {topic}"
+    # Блок и правило не показываем до ответа — иначе они подсказывают, какую форму ставить
     content = rus + (f'<div style="font-size: 1.05rem; font-weight: 500; opacity: 0.75; margin-top: 6px;">({hint})</div>' if hint else "")
-    render_card(label, content, card_type="green")
+    render_card("🧩 Скажи по-сербски", content, card_type="green")
     if st.session_state.task.get("show_answer"):
         render_card("✅ Ответ", "<br>".join(a.strip() for a in answer.split(" / ")), card_type="orange")
-        if rule:
-            st.caption(f"Как строить: {rule}")
+        if block or rule:
+            st.caption(" · ".join(x for x in (block, f"Как строить: {rule}" if rule else "") if x))
     elif st.button("👀 Показать ответ", use_container_width=True):
         st.session_state.task["show_answer"] = True
         st.rerun()
